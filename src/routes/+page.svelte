@@ -6,10 +6,90 @@
 	import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
 	import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
 	import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
+	import { Raycaster, Vector2 } from 'three';
 
+	let raycaster = new Raycaster();
+	let mouse = new Vector2();
 	let canvas;
+	let clickedObject = null;
+	let hoveredObject = null;
+	let haseMoved = false;
 
 	onMount(() => {
+		window.addEventListener('mouseenter', (event) => {
+			// Convert screen coordinates to normalized device coordinates (-1 to 1)
+			mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+			mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+			// Update raycaster
+			raycaster.setFromCamera(mouse, camera);
+
+			// Check for intersections
+			const intersects = raycaster.intersectObjects(scene.children, true);
+
+			if (intersects.length > 0) {
+				hoveredObject = intersects[0].object;
+			}
+		});
+
+		window.addEventListener('mousemove', () => {
+			haseMoved = true;
+			hoveredObject = null;
+		});
+		window.addEventListener('mousedown', (event) => {
+			haseMoved = false;
+			// Convert screen coordinates to normalized device coordinates (-1 to 1)
+			mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+			mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+			// Update raycaster
+			raycaster.setFromCamera(mouse, camera);
+
+			// Check for intersections
+			const intersects = raycaster.intersectObjects(scene.children, true);
+
+			if (intersects.length > 0) {
+				clickedObject = intersects[0].object;
+			}
+		});
+		window.addEventListener('mouseup', (event) => {
+			if (clickedObject) {
+				// Convert screen coordinates to normalized device coordinates (-1 to 1)
+				mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+				mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+				// Update raycaster
+				raycaster.setFromCamera(mouse, camera);
+
+				// Check for intersections
+				const intersects = raycaster.intersectObjects(scene.children, true);
+
+				if (intersects.length > 0) {
+					let newClickedObject = intersects[0].object;
+
+					if (
+						!haseMoved &&
+						clickedObject.userData.groupName === newClickedObject.userData.groupName
+					) {
+						clickedObject = null;
+						// Find the parent sign node
+						while (newClickedObject.parent && !newClickedObject.userData.groupName) {
+							newClickedObject = newClickedObject.parent;
+						}
+
+						if (newClickedObject.userData.groupName) {
+							const groupName = newClickedObject.userData.groupName;
+							const url = `${decodeURIComponent(groupName.replace('sign_', ''))}`;
+
+							window.open(url, '_blank');
+						}
+					} else {
+						clickedObject = null;
+					}
+				}
+			}
+		});
+
 		// Scene, camera, and renderer setup
 		const scene = new THREE.Scene();
 		const camera = new THREE.PerspectiveCamera(
@@ -18,25 +98,43 @@
 			0.1,
 			1000
 		);
+
+		// Add fog to the scene to fade the floor into the distance
+		scene.fog = new THREE.Fog(0x0a0a2a, 10, 100);
+
+		// Create a large plane for the floor
+		const floorGeometry = new THREE.CircleGeometry(150, 64);
+		const floorMaterial = new THREE.MeshStandardMaterial({
+			color: 0x222222,
+			roughness: 1
+		});
+		const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+		floor.rotation.x = -Math.PI / 2; // Rotate to be horizontal
+		scene.add(floor);
+		// Move the floor down by 10 units
+		floor.position.y = -10;
 		const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 		renderer.setSize(window.innerWidth, window.innerHeight);
 		renderer.setPixelRatio(window.devicePixelRatio);
 
 		// Set the background color of the scene to sky blue
-		// scene.background = new THREE.Color(0x0a0a2a);
-		scene.background = new THREE.Color(0x000000);
+		scene.background = new THREE.Color(0x0a0a2a);
+		// scene.background = new THREE.Color(0x000000);
+		// Set the floor color to the same as the background color
+		floor.material.color.set(0x666666);
 
 		// OrbitControls setup
 		const controls = new OrbitControls(camera, renderer.domElement);
 		controls.enableDamping = true;
 		controls.dampingFactor = 0.1;
-		controls.minPolarAngle = 0; // Prevent going below the ground
+		controls.minPolarAngle = Math.PI / 4; // Prevent going below the ground
 		controls.maxPolarAngle = Math.PI / 2; // Prevent flipping the view
 		controls.enablePan = false; // Disable panning
 		controls.screenSpacePanning = false;
 		controls.minAzimuthAngle = 0; // Restrict horizontal rotation to -90 degrees
 		controls.maxAzimuthAngle = Math.PI / 2; // Restrict horizontal rotation to 90 degrees
-
+		controls.minDistance = 10; // Set the minimum zoom distance
+		controls.maxDistance = 50; // Set the maximum zoom distance
 		// Camera position
 		camera.position.set(0, 0, 25);
 		controls.update();
@@ -58,7 +156,7 @@
 		// Load the GLTF model
 		const loader = new GLTFLoader();
 		loader.load(
-			'/DIORAMA_3.1.gltf',
+			'/DIORAMA 3.2.gltf',
 			(gltf) => {
 				// Set position and add the scene to the main scene
 				gltf.scene.position.set(0, -8, 0);
@@ -113,6 +211,30 @@
 						});
 					});
 				});
+
+				// Add a spotlight to the scene
+				const spotlight = new THREE.SpotLight(0xffffff, 5);
+				spotlight.target.position.set(3.5, 12, -9);
+				spotlight.position.set(3.5, 9, -8);
+				spotlight.angle = Math.PI / 3; // Set the angle of the spotlight
+				spotlight.penumbra = 0.1; // Set the penumbra of the spotlight
+				spotlight.decay = 2; // Set the decay of the spotlight
+				spotlight.distance = 5; // Set the distance of the spotlight
+				spotlight.castShadow = true; // Enable shadows for the spotlight
+				// Rotate the spotlight to face diagonally up instead of down
+				scene.add(spotlight.target);
+				// Set up shadow properties for the spotlight
+				spotlight.shadow.mapSize.width = 100;
+				spotlight.shadow.mapSize.height = 100;
+				spotlight.shadow.camera.near = 10;
+				spotlight.shadow.camera.far = 200;
+				spotlight.shadow.camera.fov = 30;
+
+				// Create a helper to visualize the spotlight
+				// const spotlightHelper = new THREE.SpotLightHelper(spotlight);
+				// scene.add(spotlightHelper);
+
+				scene.add(spotlight);
 
 				console.log('Sign Nodes:', signNodes);
 				console.log('Street Light Nodes:', streetLightNodes);
@@ -174,12 +296,15 @@
 
 				// Add white lights for street lights
 				streetLightNodes.forEach((node) => {
-					const streetLight = new THREE.PointLight(0xffffff, 10, 20); // White light
+					const streetLight = new THREE.PointLight(0xffffff, 10, 30); // White light
 					// Get the world position of the node
 					const worldPosition = new THREE.Vector3();
 					node.getWorldPosition(worldPosition);
 					streetLight.position.copy(worldPosition);
 					worldPosition.y -= 2; // Move the light down by 2 units
+					streetLight.position.copy(worldPosition);
+					streetLight.position.x -= 2; // Move the light to the right by 2 units
+					streetLight.position.z -= 2; // Move the light forward by 2 units
 					scene.add(streetLight);
 				});
 			},
